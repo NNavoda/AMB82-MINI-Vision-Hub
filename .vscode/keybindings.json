@@ -1,0 +1,26 @@
+[
+    {
+        "key": "ctrl+r",
+        "command": "workbench.action.tasks.runTask",
+        "args": "🔨 Verify (Compile)",
+        "when": "resourceExtname == '.ino'"
+    },
+    {
+        "key": "ctrl+u",
+        "command": "workbench.action.tasks.runTask",
+        "args": "⬆️ Upload",
+        "when": "resourceExtname == '.ino'"
+    },
+    {
+        "key": "ctrl+shift+u",
+        "command": "workbench.action.tasks.runTask",
+        "args": "🔨 Verify + ⬆️ Upload",
+        "when": "resourceExtname == '.ino'"
+    },
+    {
+        "key": "ctrl+shift+m",
+        "command": "workbench.action.tasks.runTask",
+        "args": "📡 Serial Monitor (115200)",
+        "when": "resourceExtname == '.ino'"
+    }
+]

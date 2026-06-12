@@ -1,0 +1,13 @@
+{
+    "arduino.path": "C:\\Arduino",
+    "arduino.commandPath": "arduino-cli.exe",
+    "arduino.useArduinoCli": true,
+    "arduino.additionalUrls": "https://github.com/Ameba-AIoT/ameba-arduino-pro2/raw/main/Arduino_package/package_realtek_amebapro2_index.json",
+    "arduino.logLevel": "info",
+    "arduino.enableUSBDetection": true,
+    "editor.formatOnSave": false,
+    "files.associations": {
+        "*.ino": "cpp"
+    },
+    "C_Cpp.intelliSenseEngine": "Tag Parser"
+}

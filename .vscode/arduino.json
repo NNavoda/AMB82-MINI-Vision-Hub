@@ -1,0 +1,6 @@
+{
+    "sketch": "RTSP/RTSP.ino",
+    "board": "realtek:AmebaPro2:Ameba_AMB82-MINI",
+    "port": "COM5",
+    "output": "RTSP/.build"
+}

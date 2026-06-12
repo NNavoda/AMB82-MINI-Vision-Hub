@@ -1,0 +1,98 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "🔨 Verify (Compile)",
+            "type": "shell",
+            "command": "C:\\Arduino\\arduino-cli.exe",
+            "args": [
+                "compile",
+                "--fqbn", "realtek:AmebaPro2:Ameba_AMB82-MINI",
+                "--warnings", "default",
+                "--build-path", "${workspaceFolder}\\RTSP\\.build",
+                "${workspaceFolder}\\RTSP\\RTSP.ino"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": {
+                "owner": "cpp",
+                "fileLocation": ["absolute"],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            }
+        },
+        {
+            "label": "⬆️ Upload",
+            "type": "shell",
+            "command": "C:\\Arduino\\arduino-cli.exe",
+            "args": [
+                "upload",
+                "-p", "COM5",
+                "--fqbn", "realtek:AmebaPro2:Ameba_AMB82-MINI",
+                "${workspaceFolder}\\RTSP\\RTSP.ino"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🔨 Verify + ⬆️ Upload",
+            "type": "shell",
+            "command": "C:\\Arduino\\arduino-cli.exe",
+            "args": [
+                "compile",
+                "--fqbn", "realtek:AmebaPro2:Ameba_AMB82-MINI",
+                "--upload",
+                "-p", "COM5",
+                "--warnings", "default",
+                "${workspaceFolder}\\RTSP\\RTSP.ino"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "📡 Serial Monitor (115200)",
+            "type": "shell",
+            "command": "C:\\Arduino\\arduino-cli.exe",
+            "args": [
+                "monitor",
+                "-p", "COM5",
+                "--config", "baudrate=115200"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": [],
+            "isBackground": true
+        }
+    ]
+}

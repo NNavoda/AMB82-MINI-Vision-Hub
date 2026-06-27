@@ -1,164 +1,102 @@
 /**
  * ============================================================
- *  GESTURE GLOVE CONTROLLER — Full Firmware v1.0
- *  Hardware : ESP32-C3 Super Mini  +  MPU-6050
- *  Role     : Reads hand tilt via MPU-6050, classifies into
- *             directional gestures, sends HTTP commands to the
- *             ESP32 car node (WebMotorControl).
- * ============================================================
- *
- *  GESTURE MAP (pitch = forward/backward tilt,
- *               roll  = left/right tilt):
- *
- *    Pitch < -DEAD_ZONE   → FORWARD
- *    Pitch >  DEAD_ZONE   → REVERSE
- *    Roll  < -DEAD_ZONE   → LEFT  (tank spin)
- *    Roll  >  DEAD_ZONE   → RIGHT (tank spin)
- *    Flat (both in zone)  → STOP
- *
- *  SPEED MAPPING:
- *    Scales linearly from MIN_SPEED at threshold
- *    to MAX_SPEED at MAX_ANGLE_DEG.
- *
- *  CHECKLIST:
- *    [x] Wi-Fi Station Mode
- *    [x] MPU-6050 I²C gesture pipeline
- *    [x] Complementary filter (pitch / roll)
- *    [x] HTTP motor commands to car node
- *
- *  WIRING:
- *    MPU-6050 SDA → GPIO 6
- *    MPU-6050 SCL → GPIO 7
- *    MPU-6050 VCC → 3.3 V  (NOT 5V — GPIOs are 3.3 V!)
- *    MPU-6050 GND → GND
- *    MPU-6050 AD0 → GND    (I²C address = 0x68)
- *    MPU-6050 INT → NC
+ *  GESTURE GLOVE CONTROLLER — ESP-NOW Mecanum v1.1
+ *  Hardware : ESP32-C3 Super Mini + MPU-6050
+ *  Role     : Reads IMU data, calculates Mecanum kinematics,
+ *             and sends motor commands directly to the car 
+ *             via low-latency ESP-NOW protocol.
  * ============================================================
  */
 
 #include <Wire.h>
+#include <esp_now.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
 
-// ──────────────────────────────────────────────────────────────
-//  USER CONFIG
-// ──────────────────────────────────────────────────────────────
+// ------------------------------------------------------------
+//  HARDWARE & TUNING
+// ------------------------------------------------------------
+#define I2C_SDA 6
+#define I2C_SCL 7
+#define LED_PIN 8
 
-#define WIFI_SSID     "Redmi Note 10 Pro"
-#define WIFI_PASSWORD "00000007"
+const float COMP_ALPHA    = 0.98f;
+const float DEAD_ZONE_DEG = 12.0f;
+const float MAX_ANGLE_DEG = 45.0f;
+const float GYRO_DEAD_Z   = 30.0f; // deg/sec
+const float GYRO_MAX_Z    = 150.0f;
 
-// IP shown by car's Serial Monitor at boot — update after first connection
-#define CAR_IP   "172.23.30.208"   // ← CHANGE THIS to your car's IP
-#define CAR_PORT 80
+const int MIN_SPEED = 80;
+const int MAX_SPEED = 220;
 
-// ──────────────────────────────────────────────────────────────
-//  HARDWARE
-// ──────────────────────────────────────────────────────────────
+const int MPU_ADDR = 0x68;
+const float ACCEL_SCALE = 16384.0f;
+const float GYRO_SCALE  = 131.0f;
 
-#define LED_PIN   8       // Onboard blue LED (active HIGH)
-#define MPU_SDA   6       // I²C data  → SDA on MPU-6050
-#define MPU_SCL   7       // I²C clock → SCL on MPU-6050
-#define MPU_ADDR  0x68    // AD0 tied LOW → 0x68
+// ------------------------------------------------------------
+//  ESP-NOW SETUP
+// ------------------------------------------------------------
+// Car's MAC Address: 30:76:f5:e7:e6:68
+uint8_t carMacAddress[] = {0x30, 0x76, 0xF5, 0xE7, 0xE6, 0x68};
 
-// ──────────────────────────────────────────────────────────────
-//  GESTURE TUNING — adjust to your hand/mount orientation
-// ──────────────────────────────────────────────────────────────
+esp_now_peer_info_t peerInfo;
 
-#define DEAD_ZONE_DEG  12     // ±12° flat zone → STOP
-#define MAX_ANGLE_DEG  45     // tilt at which speed hits MAX_SPEED
-#define MIN_SPEED      80     // lowest PWM sent (keeps motors turning)
-#define MAX_SPEED      220    // highest PWM sent (0-255 range)
+typedef struct CarCommand {
+    int16_t fl;
+    int16_t fr;
+    int16_t rl;
+    int16_t rr;
+} CarCommand;
 
-// Complementary filter weight (0=all gyro, 1=all accel)
-#define COMP_ALPHA     0.96f
+CarCommand cmd;
 
-// Loop timing
-#define SAMPLE_MS      50     // IMU read period  (20 Hz)
-#define HTTP_INTERVAL  80     // min ms between HTTP requests
-
-// ──────────────────────────────────────────────────────────────
-//  MPU-6050 REGISTERS
-// ──────────────────────────────────────────────────────────────
-#define MPU_PWR_MGMT_1   0x6B
-#define MPU_CONFIG       0x1A
-#define MPU_GYRO_CONFIG  0x1B
-#define MPU_ACCEL_CONFIG 0x1C
-#define MPU_ACCEL_XOUT_H 0x3B
-
-#define ACCEL_SCALE 16384.0f   // LSB/g   at ±2 g
-#define GYRO_SCALE    131.0f   // LSB/°/s at ±250 °/s
-
-// ──────────────────────────────────────────────────────────────
-//  TYPES
-// ──────────────────────────────────────────────────────────────
-enum Gesture { G_STOP, G_FORWARD, G_REVERSE, G_LEFT, G_RIGHT };
-const char* gestureName[] = { "STOP", "FORWARD", "REVERSE", "LEFT", "RIGHT" };
-
+// ------------------------------------------------------------
+//  STATE
+// ------------------------------------------------------------
 struct ImuData { float ax, ay, az, gx, gy, gz; };
 
-// ──────────────────────────────────────────────────────────────
-//  STATE
-// ──────────────────────────────────────────────────────────────
-float   pitch = 0.0f, roll = 0.0f;
-Gesture currentGesture  = G_STOP;
-Gesture lastSentGesture = G_STOP;
-int     lastSentSpeed   = 0;
-
-unsigned long lastSampleMs  = 0;
-unsigned long lastHttpMs    = 0;
+float pitch = 0, roll = 0;
+unsigned long lastUpdate = 0;
+unsigned long lastSend = 0;
 unsigned long lastLedToggle = 0;
-bool          ledState      = false;
+bool ledState = false;
 
-String carBase;
-
-// ──────────────────────────────────────────────────────────────
-//  MPU-6050 I²C HELPERS
-// ──────────────────────────────────────────────────────────────
-bool mpuWriteReg(uint8_t reg, uint8_t val) {
+// ------------------------------------------------------------
+//  MPU-6050
+// ------------------------------------------------------------
+void writeReg(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(reg); Wire.write(val);
-  return Wire.endTransmission() == 0;
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
 }
 
-bool mpuRead14(uint8_t* buf) {
+bool initMPU() {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(MPU_ACCEL_XOUT_H);
-  if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
-  for (uint8_t i = 0; i < 14 && Wire.available(); i++) buf[i] = Wire.read();
+  if (Wire.endTransmission() != 0) return false;
+  writeReg(0x6B, 0x00); // Wake up
+  writeReg(0x1C, 0x00); // Accel config: ±2g
+  writeReg(0x1B, 0x00); // Gyro config: ±250°/s
   return true;
 }
 
-bool mpuInit() {
-  mpuWriteReg(MPU_PWR_MGMT_1,   0x00);  // wake up
-  delay(100);
-  mpuWriteReg(MPU_CONFIG,       0x04);  // DLPF ~21 Hz
-  mpuWriteReg(MPU_GYRO_CONFIG,  0x00);  // ±250 °/s
-  mpuWriteReg(MPU_ACCEL_CONFIG, 0x00);  // ±2 g
-  // Verify comms: read WHO_AM_I (0x75) — should return 0x68
+bool readIMU(ImuData& d) {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x75);
+  Wire.write(0x3B);
   if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1);
-  return Wire.available() && Wire.read() == 0x68;
-}
-
-bool mpuRead(ImuData& d) {
+  
+  if (Wire.requestFrom(MPU_ADDR, 14) != 14) return false;
   uint8_t buf[14];
-  if (!mpuRead14(buf)) return false;
+  for (int i=0; i<14; i++) buf[i] = Wire.read();
+
   d.ax = (int16_t)(buf[0]  << 8 | buf[1])  / ACCEL_SCALE;
   d.ay = (int16_t)(buf[2]  << 8 | buf[3])  / ACCEL_SCALE;
   d.az = (int16_t)(buf[4]  << 8 | buf[5])  / ACCEL_SCALE;
-  // buf[6..7] = temperature, skip
   d.gx = (int16_t)(buf[8]  << 8 | buf[9])  / GYRO_SCALE;
   d.gy = (int16_t)(buf[10] << 8 | buf[11]) / GYRO_SCALE;
   d.gz = (int16_t)(buf[12] << 8 | buf[13]) / GYRO_SCALE;
   return true;
 }
 
-// ──────────────────────────────────────────────────────────────
-//  COMPLEMENTARY FILTER
-// ──────────────────────────────────────────────────────────────
 void updateAngles(const ImuData& d, float dt) {
   float pa = atan2f(-d.ax, sqrtf(d.ay*d.ay + d.az*d.az)) * RAD_TO_DEG;
   float ra = atan2f( d.ay, d.az) * RAD_TO_DEG;
@@ -166,194 +104,123 @@ void updateAngles(const ImuData& d, float dt) {
   roll  = COMP_ALPHA * (roll  + d.gx * dt) + (1.0f - COMP_ALPHA) * ra;
 }
 
-// ──────────────────────────────────────────────────────────────
-//  GESTURE CLASSIFICATION
-// ──────────────────────────────────────────────────────────────
-Gesture classifyGesture(float p, float r) {
-  bool fp = p < -DEAD_ZONE_DEG, rp = p > DEAD_ZONE_DEG;
-  bool fl = r < -DEAD_ZONE_DEG, fr = r > DEAD_ZONE_DEG;
-  if (fp && !fl && !fr) return G_FORWARD;
-  if (rp && !fl && !fr) return G_REVERSE;
-  if (fl && !fp && !rp) return G_LEFT;
-  if (fr && !fp && !rp) return G_RIGHT;
-  return G_STOP;
+// ------------------------------------------------------------
+//  KINEMATICS
+// ------------------------------------------------------------
+int getSignedSpeed(float value, float deadZone, float maxValue) {
+  if (fabsf(value) < deadZone) return 0;
+  float mag = fabsf(value) - deadZone;
+  float frac = constrain(mag / (maxValue - deadZone), 0.0f, 1.0f);
+  int speed = (int)(MIN_SPEED + frac * (MAX_SPEED - MIN_SPEED));
+  return (value > 0) ? speed : -speed;
 }
 
-int gestureSpeed(float angle) {
-  float mag  = fabsf(angle) - DEAD_ZONE_DEG;
-  if (mag <= 0) return 0;
-  float frac = constrain(mag / (MAX_ANGLE_DEG - DEAD_ZONE_DEG), 0.0f, 1.0f);
-  return (int)(MIN_SPEED + frac * (MAX_SPEED - MIN_SPEED));
-}
+void calculateMecanum(float p, float r, float yaw_rate) {
+  // Pitch < 0 means tilt forward -> Positive Y
+  int Y = -getSignedSpeed(p, DEAD_ZONE_DEG, MAX_ANGLE_DEG);
+  
+  // Roll > 0 means tilt right -> Positive X
+  int X = getSignedSpeed(r, DEAD_ZONE_DEG, MAX_ANGLE_DEG);
+  
+  // Yaw Rate > 0 means twist right -> Positive Z
+  int Z = getSignedSpeed(yaw_rate, GYRO_DEAD_Z, GYRO_MAX_Z);
 
-// ──────────────────────────────────────────────────────────────
-//  HTTP MOTOR COMMANDS
-// ──────────────────────────────────────────────────────────────
-void httpGet(const String& url) {
-  HTTPClient http;
-  http.begin(url);
-  http.setTimeout(200);
-  http.GET();
-  http.end();
-}
+  // Mecanum mixing equations
+  int fl = Y + X + Z;
+  int fr = Y - X - Z;
+  int rl = Y - X + Z;
+  int rr = Y + X - Z;
 
-void setMotor(const char* m, int spd) {
-  httpGet(carBase + "/set?motor=" + m + "&speed=" + String(spd));
-}
-
-void sendStop() {
-  httpGet(carBase + "/stopall");
-  Serial.println("[HTTP] STOP ALL");
-}
-
-void sendAllMotors(int spd) {
-  const char* m[] = {"fl", "fr", "rl", "rr"};
-  for (int i = 0; i < 4; i++) setMotor(m[i], spd);
-  Serial.printf("[HTTP] ALL %+d\n", spd);
-}
-
-void sendTurnLeft(int spd) {
-  // Left wheels back, right wheels forward → spins left
-  setMotor("fl", -spd); setMotor("rl", -spd);
-  setMotor("fr",  spd); setMotor("rr",  spd);
-  Serial.printf("[HTTP] TURN LEFT %d\n", spd);
-}
-
-void sendTurnRight(int spd) {
-  // Left wheels forward, right wheels back → spins right
-  setMotor("fl",  spd); setMotor("rl",  spd);
-  setMotor("fr", -spd); setMotor("rr", -spd);
-  Serial.printf("[HTTP] TURN RIGHT %d\n", spd);
-}
-
-void dispatchGesture(Gesture g, int spd) {
-  switch (g) {
-    case G_FORWARD: sendAllMotors( spd); break;
-    case G_REVERSE: sendAllMotors(-spd); break;
-    case G_LEFT:    sendTurnLeft(  spd); break;
-    case G_RIGHT:   sendTurnRight( spd); break;
-    default:        sendStop();          break;
+  // Normalize speeds to keep them within PWM limits
+  int max_spd = max(max(abs(fl), abs(fr)), max(abs(rl), abs(rr)));
+  if (max_spd > MAX_SPEED) {
+    fl = fl * MAX_SPEED / max_spd;
+    fr = fr * MAX_SPEED / max_spd;
+    rl = rl * MAX_SPEED / max_spd;
+    rr = rr * MAX_SPEED / max_spd;
   }
+  
+  // Clamp very low values below MIN_SPEED back to 0
+  if (abs(fl) < MIN_SPEED) fl = 0;
+  if (abs(fr) < MIN_SPEED) fr = 0;
+  if (abs(rl) < MIN_SPEED) rl = 0;
+  if (abs(rr) < MIN_SPEED) rr = 0;
+
+  cmd.fl = fl;
+  cmd.fr = fr;
+  cmd.rl = rl;
+  cmd.rr = rr;
 }
 
-// ──────────────────────────────────────────────────────────────
-//  LED
-// ──────────────────────────────────────────────────────────────
-void blinkLED(unsigned long ms) {
-  if (millis() - lastLedToggle >= ms) {
-    lastLedToggle = millis();
-    ledState = !ledState;
-    digitalWrite(LED_PIN, ledState);
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-//  SETUP
-// ──────────────────────────────────────────────────────────────
+// ------------------------------------------------------------
+//  MAIN
+// ------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-  delay(400);
-  Serial.println("\n==============================================");
-  Serial.println("  Gesture Glove — Full Firmware v1.0");
-  Serial.println("  ESP32-C3 Super Mini + MPU-6050");
-  Serial.println("==============================================");
-
   pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+  
+  delay(1000);
+  Serial.println("\n=== Gesture Glove: ESP-NOW Mecanum ===");
 
-  // ── I²C + MPU-6050 ──────────────────────────────────────────
-  Wire.begin(MPU_SDA, MPU_SCL);
-  Wire.setClock(400000);
-  Serial.print("  MPU-6050 init… ");
-  if (!mpuInit()) {
-    Serial.println("FAILED!");
-    Serial.println("  Check: SDA→GPIO6  SCL→GPIO7  VCC→3V3  GND→GND  AD0→GND");
-    // SOS blink forever
-    while (true) {
-      for (int i = 0; i < 3; i++) {
-        digitalWrite(LED_PIN, HIGH); delay(120);
-        digitalWrite(LED_PIN, LOW);  delay(120);
-      }
-      delay(400);
-    }
+  Wire.begin(I2C_SDA, I2C_SCL);
+  if (!initMPU()) {
+    Serial.println("MPU-6050 NOT FOUND!");
+    while (1) { digitalWrite(LED_PIN, !digitalRead(LED_PIN)); delay(100); }
   }
-  Serial.println("OK (0x68)");
+  Serial.println("MPU-6050 Init OK");
 
-  // ── Wi-Fi ───────────────────────────────────────────────────
+  // Init Wi-Fi and ESP-NOW
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true); delay(100);
-  Serial.printf("  Connecting to \"%s\"", WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    blinkLED(300); delay(5);
-    Serial.print('.');
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    while(1) { delay(100); }
   }
-  Serial.println("\n  Wi-Fi CONNECTED!");
-  Serial.printf("  IP  : %s\n", WiFi.localIP().toString().c_str());
-
-  carBase = "http://" CAR_IP ":" + String(CAR_PORT);
-  Serial.printf("  Car : %s\n", carBase.c_str());
-  Serial.println("----------------------------------------------");
-  Serial.printf("  Dead zone ±%d°   Max angle ±%d°\n", DEAD_ZONE_DEG, MAX_ANGLE_DEG);
-  Serial.printf("  Speed range %d – %d PWM\n", MIN_SPEED, MAX_SPEED);
-  Serial.println("  Ready — tilt glove to drive!\n");
-
-  lastSampleMs = millis();
+  
+  // Register peer
+  memcpy(peerInfo.peer_addr, carMacAddress, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    while(1) { delay(100); }
+  }
+  
+  Serial.println("ESP-NOW Ready. Sending commands to Car.");
+  lastUpdate = micros();
 }
 
-// ──────────────────────────────────────────────────────────────
-//  LOOP
-// ──────────────────────────────────────────────────────────────
 void loop() {
-  unsigned long now = millis();
+  unsigned long now = micros();
+  float dt = (now - lastUpdate) / 1000000.0f;
+  lastUpdate = now;
 
-  // ── IMU @ 20 Hz ─────────────────────────────────────────────
-  if (now - lastSampleMs >= SAMPLE_MS) {
-    float dt = (now - lastSampleMs) / 1000.0f;
-    lastSampleMs = now;
-    ImuData imu;
-    if (mpuRead(imu)) updateAngles(imu, dt);
+  ImuData d;
+  if (readIMU(d)) {
+    updateAngles(d, dt);
+    
+    // Calculate and update global 'cmd' struct
+    calculateMecanum(pitch, roll, d.gz);
+    
+    // Send data at 50Hz (every 20ms)
+    if (millis() - lastSend >= 20) {
+      esp_now_send(carMacAddress, (uint8_t *) &cmd, sizeof(cmd));
+      lastSend = millis();
+      
+      // Blink LED faster if we're moving
+      bool isMoving = (cmd.fl != 0 || cmd.fr != 0 || cmd.rl != 0 || cmd.rr != 0);
+      unsigned long blinkRate = isMoving ? 100 : 1000;
+      if (millis() - lastLedToggle >= blinkRate) {
+        lastLedToggle = millis();
+        ledState = !ledState;
+        digitalWrite(LED_PIN, ledState);
+      }
+    }
+  } else {
+    Serial.println("I2C Error");
   }
 
-  // ── Classify ─────────────────────────────────────────────────
-  currentGesture = classifyGesture(pitch, roll);
-  int speed = 0;
-  if      (currentGesture == G_FORWARD || currentGesture == G_REVERSE) speed = gestureSpeed(pitch);
-  else if (currentGesture == G_LEFT    || currentGesture == G_RIGHT)   speed = gestureSpeed(roll);
-
-  // ── Send HTTP when gesture or speed changes ──────────────────
-  bool gChanged = (currentGesture != lastSentGesture);
-  bool sChanged = abs(speed - lastSentSpeed) > 15;
-  bool ready    = (now - lastHttpMs >= HTTP_INTERVAL);
-
-  if ((gChanged || (sChanged && currentGesture != G_STOP)) && ready) {
-    Serial.printf("[GES] %-8s  P=%+5.1f°  R=%+5.1f°  spd=%d\n",
-                  gestureName[currentGesture], pitch, roll, speed);
-    dispatchGesture(currentGesture, speed);
-    lastSentGesture = currentGesture;
-    lastSentSpeed   = speed;
-    lastHttpMs      = millis();
-  }
-
-  // ── LED: fast = active gesture, slow = idle ──────────────────
-  blinkLED(currentGesture != G_STOP ? 80 : 800);
+  // Sleep remainder of ~5ms loop (200Hz sampling for IMU)
+  long wait = 5000 - (micros() - now);
+  if (wait > 0) delayMicroseconds(wait);
 }
-
-// ============================================================
-//  WIRING REFERENCE
-// ============================================================
-//
-//  MPU-6050 (GY-521 module)    ESP32-C3 Super Mini
-//  ─────────────────────────   ──────────────────────────
-//  VCC                      →  3V3   (3.3 V — NOT 5V!)
-//  GND                      →  GND
-//  SDA                      →  GPIO 6
-//  SCL                      →  GPIO 7
-//  AD0                      →  GND   (address = 0x68)
-//  INT, XDA, XCL            →  NC (not connected)
-//
-//  NOTES:
-//  • GY-521 module already has 4.7kΩ pull-ups on SDA/SCL.
-//  • Keep wires short (≤10 cm) for reliable 400 kHz I²C.
-//  • ESP32-C3 GPIOs are 3.3 V max — never apply 5 V to them.
-//  • Onboard LED on GPIO 8: fast blink=gesture, slow blink=idle.
-// ============================================================

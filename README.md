@@ -66,6 +66,8 @@ AMB82-MINI-Vision-Hub/
 ├── ESP32-Car/
 │   ├── ESPNOW_Receiver/          
 │   │   └── ESPNOW_Receiver.ino   # ESP32 ESP-NOW Mecanum Motor Controller
+│   ├── ESPNOW_ServoTracker/
+│   │   └── ESPNOW_ServoTracker.ino # Temporary ESP-NOW Pan/Tilt Head Tracker
 │   └── WebMotorControl/          # (Legacy) HTTP Web Dashboard Controller
 ├── Gesture_Glove/
 │   └── Gesture_Glove.ino         # ESP32-C3 ESP-NOW IMU Glove Controller
@@ -108,6 +110,7 @@ AMB82-MINI-Vision-Hub/
 - [x] **v1.0** — Vision Hub: RTSP streaming + YOLOv4 object detection OSD
 - [x] **v1.1** — Decentralized nodes: Car web controller + IMU Gesture Glove
 - [x] **v1.2** — ESP-NOW upgrade: Ultra-low latency Mecanum drive kinematics
+- [x] **v1.3** — Head Tracker Prototype: Absolute Pan/Tilt servo tracking via Glove IMU
 - [ ] **v2.0** — Full autonomous navigation loop (Vision Hub sending UDP drive commands)
 
 ---

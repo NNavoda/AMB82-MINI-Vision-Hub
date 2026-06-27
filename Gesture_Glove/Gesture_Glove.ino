@@ -45,6 +45,9 @@ typedef struct CarCommand {
     int16_t fr;
     int16_t rl;
     int16_t rr;
+    float pitch;
+    float roll;
+    float yaw_rate;
 } CarCommand;
 
 CarCommand cmd;
@@ -150,6 +153,9 @@ void calculateMecanum(float p, float r, float yaw_rate) {
   cmd.fr = fr;
   cmd.rl = rl;
   cmd.rr = rr;
+  cmd.pitch = p;
+  cmd.roll = r;
+  cmd.yaw_rate = yaw_rate;
 }
 
 // ------------------------------------------------------------

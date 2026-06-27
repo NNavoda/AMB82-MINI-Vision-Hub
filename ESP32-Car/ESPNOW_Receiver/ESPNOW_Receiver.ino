@@ -46,6 +46,9 @@ typedef struct CarCommand {
     int16_t fr; // Front-Right speed
     int16_t rl; // Rear-Left speed
     int16_t rr; // Rear-Right speed
+    float pitch;
+    float roll;
+    float yaw_rate;
 } CarCommand;
 
 CarCommand incomingCmd;
@@ -123,8 +126,10 @@ void allStop() {
 // Callback when data is received
 // ----------------------------------------------------------
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  memcpy(&incomingCmd, incomingData, sizeof(incomingCmd));
-  lastRecvTime = millis();
+  if (len == sizeof(incomingCmd)) {
+    memcpy(&incomingCmd, incomingData, sizeof(incomingCmd));
+    lastRecvTime = millis();
+  }
 }
 
 // ----------------------------------------------------------

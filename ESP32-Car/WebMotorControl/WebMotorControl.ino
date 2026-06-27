@@ -29,14 +29,16 @@ const char* PASSWORD = "00000007";
 
 // ----------------------------------------------------------
 // PIN DEFINITIONS — RIGHT MOTOR CONTROLLER
+//   FR motor : B-channel (BIN1, BIN2, PWMB)
+//   RR motor : A-channel (AIN1, AIN2, PWMA)
 // ----------------------------------------------------------
-#define M_FR_PWMA  14
-#define M_FR_AIN1  26
-#define M_FR_AIN2  27
+#define M_FR_BIN1  26
+#define M_FR_BIN2  27
+#define M_FR_PWMB  14
 
-#define M_RR_BIN1  33
-#define M_RR_BIN2  25
-#define M_RR_PWMB  32
+#define M_RR_AIN1  33
+#define M_RR_AIN2  25
+#define M_RR_PWMA  32
 
 // ----------------------------------------------------------
 // PIN DEFINITIONS — CAMERA SERVO (MG996R, 180°)
@@ -118,17 +120,17 @@ void driveFL(int spd) {
   }
 }
 
-/** Drive Front-Right — direction fully inverted vs original to fix reverse */
+/** Drive Front-Right — B-channel (BIN1=GPIO26, BIN2=GPIO14, PWMB=GPIO27) */
 void driveFR(int spd) {
   if (spd == 0) {
-    digitalWrite(M_FR_AIN1, LOW); digitalWrite(M_FR_AIN2, LOW);
-    ledcWrite(M_FR_PWMA, 0);
+    digitalWrite(M_FR_BIN1, LOW); digitalWrite(M_FR_BIN2, LOW);
+    ledcWrite(M_FR_PWMB, 0);
   } else if (spd > 0) {
-    digitalWrite(M_FR_AIN1, HIGH); digitalWrite(M_FR_AIN2, LOW);
-    ledcWrite(M_FR_PWMA, spd);
+    digitalWrite(M_FR_BIN1, HIGH); digitalWrite(M_FR_BIN2, LOW);
+    ledcWrite(M_FR_PWMB, spd);
   } else {
-    digitalWrite(M_FR_AIN1, LOW);  digitalWrite(M_FR_AIN2, HIGH);
-    ledcWrite(M_FR_PWMA, -spd);
+    digitalWrite(M_FR_BIN1, LOW);  digitalWrite(M_FR_BIN2, HIGH);
+    ledcWrite(M_FR_PWMB, -spd);
   }
 }
 
@@ -146,17 +148,17 @@ void driveRL(int spd) {
   }
 }
 
-/** Drive Rear-Right — direction fully inverted vs original to fix reverse */
+/** Drive Rear-Right — A-channel (AIN1=GPIO33, AIN2=GPIO25, PWMA=GPIO32) */
 void driveRR(int spd) {
   if (spd == 0) {
-    digitalWrite(M_RR_BIN1, LOW); digitalWrite(M_RR_BIN2, LOW);
-    ledcWrite(M_RR_PWMB, 0);
+    digitalWrite(M_RR_AIN1, LOW); digitalWrite(M_RR_AIN2, LOW);
+    ledcWrite(M_RR_PWMA, 0);
   } else if (spd > 0) {
-    digitalWrite(M_RR_BIN1, LOW);  digitalWrite(M_RR_BIN2, HIGH);
-    ledcWrite(M_RR_PWMB, spd);
+    digitalWrite(M_RR_AIN1, LOW);  digitalWrite(M_RR_AIN2, HIGH);
+    ledcWrite(M_RR_PWMA, spd);
   } else {
-    digitalWrite(M_RR_BIN1, HIGH); digitalWrite(M_RR_BIN2, LOW);
-    ledcWrite(M_RR_PWMB, -spd);
+    digitalWrite(M_RR_AIN1, HIGH); digitalWrite(M_RR_AIN2, LOW);
+    ledcWrite(M_RR_PWMA, -spd);
   }
 }
 
@@ -689,14 +691,14 @@ void setup() {
   // Motor direction GPIO
   pinMode(M_FL_AIN1, OUTPUT); pinMode(M_FL_AIN2, OUTPUT);
   pinMode(M_RL_BIN1, OUTPUT); pinMode(M_RL_BIN2, OUTPUT);
-  pinMode(M_FR_AIN1, OUTPUT); pinMode(M_FR_AIN2, OUTPUT);
-  pinMode(M_RR_BIN1, OUTPUT); pinMode(M_RR_BIN2, OUTPUT);
+  pinMode(M_FR_BIN1, OUTPUT); pinMode(M_FR_BIN2, OUTPUT);   // FR = B-channel
+  pinMode(M_RR_AIN1, OUTPUT); pinMode(M_RR_AIN2, OUTPUT);   // RR = A-channel
 
   // Motor PWM — 5 kHz, 8-bit
   ledcAttach(M_FL_PWMA, PWM_FREQ, PWM_RES);
   ledcAttach(M_RL_PWMB, PWM_FREQ, PWM_RES);
-  ledcAttach(M_FR_PWMA, PWM_FREQ, PWM_RES);
-  ledcAttach(M_RR_PWMB, PWM_FREQ, PWM_RES);
+  ledcAttach(M_FR_PWMB, PWM_FREQ, PWM_RES);                 // FR = PWMB
+  ledcAttach(M_RR_PWMA, PWM_FREQ, PWM_RES);                 // RR = PWMA
 
   // Servo PWM — 50 Hz, 16-bit (separate frequency domain)
   ledcAttach(SERVO_PAN,  SERVO_FREQ, SERVO_RES);

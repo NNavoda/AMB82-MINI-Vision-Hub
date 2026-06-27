@@ -1,170 +1,111 @@
-# AMB82-MINI Vision Hub — Autonomous Robotic Car Platform
+# AMB82-MINI Vision Hub & Distributed Robotic Car Platform
 
-> **Node Role:** Isolated Vision Hub · No motor or actuator logic  
-> **Platform:** Realtek AMB82-MINI (RTL8735B · Arm v8M @ 500 MHz · NPU)  
-> **Status:** `v1.0 — Open Day Demo`
+> **Platform:** Realtek AMB82-MINI, ESP32, ESP32-C3  
+> **Status:** `v1.1 — Fully functional gesture-controlled car with AI Vision Hub`
 
 ---
 
 ## 📌 Project Overview
 
-This repository contains the firmware for the **Vision Hub node** of a distributed, multi-node autonomous robotic car system. The AMB82-MINI acts as a dedicated AI camera unit — it streams live video over RTSP and runs real-time object detection using its on-chip Neural Processing Unit (NPU), completely independent of the drive/control subsystem.
+This repository contains the firmware for a **distributed, multi-node autonomous robotic car system**. The system is decoupled into three independent nodes communicating over Wi-Fi:
+1. **Vision Hub (AMB82-MINI)**: A dedicated AI camera unit streaming live video over RTSP and running real-time object detection (YOLOv4-Tiny) using its on-chip NPU.
+2. **Motor Control Node (ESP32)**: Connects to a Wi-Fi Access Point and hosts an HTTP web server to drive 4 DC motors (via two TB6612FNG drivers) and pan/tilt servos.
+3. **Gesture Glove Controller (ESP32-C3)**: A wearable glove equipped with an MPU-6050 IMU that translates hand tilt into HTTP drive commands for the car.
 
 ### System Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│              Distributed Robotic Car Platform            │
-│                                                         │
-│   ┌──────────────────┐        ┌──────────────────────┐  │
-│   │  AMB82-MINI      │  WiFi  │  Control Node(s)     │  │
-│   │  Vision Hub      │◄──────►│  (ESP32 / RPi etc.)  │  │
-│   │  [This Repo]     │  AP    │                      │  │
-│   └──────────────────┘        └──────────────────────┘  │
-│           │                                             │
-│     ┌─────▼──────┐                                      │
-│     │ Viewer     │  rtsp://192.168.1.1:554/             │
-│     │ (VLC etc.) │                                      │
-│     └────────────┘                                      │
-└─────────────────────────────────────────────────────────┘
-```
-
-### On-Device Pipeline
-
-```
-Camera ISP
-  │
-  ├── Channel 0 (H.264 VGA 640×480 @ 20fps)
-  │       └── StreamIO ──► RTSP Server ──► Network Clients
-  │                ▲
-  │           OSD Overlay (bounding boxes drawn pre-encoding)
-  │
-  └── Channel 3 (Raw RGB 416×416 @ 20fps)
-          └── StreamIO ──► YOLOv4-Tiny NPU ──► onDetectionResult()
+```text
+┌─────────────────────────────────────────────────────────────┐
+│              Distributed Robotic Car Platform               │
+│                                                             │
+│  ┌───────────────┐           ┌───────────────────────────┐  │
+│  │ Gesture Glove │   WiFi    │       ESP32 Car Node      │  │
+│  │ (ESP32-C3 +   ├──────────►│ (ESP32 + 2x TB6612FNG +   │  │
+│  │  MPU-6050)    │ HTTP GET  │  Pan/Tilt Camera Servos)  │  │
+│  └───────────────┘           └────────────┬──────────────┘  │
+│                                           │                 │
+│  ┌───────────────┐           ┌────────────▼──────────────┐  │
+│  │  AMB82-MINI   │   WiFi    │ Viewer / Driver Dashboard │  │
+│  │  Vision Hub   ├──────────►│ (VLC + Browser Interface) │  │
+│  │  (AI Camera)  │ RTSP / AP │                           │  │
+│  └───────────────┘           └───────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## ✨ Features
 
-| Feature | Detail |
-|---------|--------|
-| 📡 **Wi-Fi SoftAP** | SSID `RobotCar-Demo` · Channel 1 · No ESP-NOW interference |
-| 🎥 **RTSP Stream** | H.264 · VGA (640×480) · 20fps · 1 Mbps · Low-latency GOP=10 |
-| 🤖 **Object Detection** | YOLOv4-Tiny · INT8 NPU · COCO 80 classes · Up to 14 objects/frame |
-| 🟩 **Live OSD Overlay** | Bounding boxes + class labels composited before H.264 encoding |
-| ⚡ **Hardware Offload** | All video, encoding, and inference via DMA + hardware interrupts |
+### 📡 **Vision Hub (AMB82-MINI)**
+- **RTSP Stream**: H.264 · VGA (640×480) · 20fps · 1 Mbps · Low-latency GOP=10
+- **Object Detection**: YOLOv4-Tiny · INT8 NPU · COCO 80 classes
+- **Live OSD Overlay**: Bounding boxes + class labels composited before H.264 encoding
 
----
+### 🚗 **Car Control Node (ESP32)**
+- **Wi-Fi Server**: Connects to network and hosts a web dashboard for manual override control.
+- **Omnidirectional Drive**: Controls 4 independent motors via dual TB6612FNG H-bridges.
+- **Pan/Tilt Camera Mount**: Drives two MG996R servos for independent camera aiming.
 
-## 🛠️ Hardware Requirements
-
-- **[Realtek AMB82-MINI](https://www.amebaiot.com/en/amebapro2-arduino-peripherals-examples/)** development board
-- USB-C cable (power + programming)
-- Camera module (onboard / compatible)
-- Wi-Fi client device (phone, laptop) for viewing the stream
-
----
-
-## 💻 Software Requirements
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| [Arduino CLI](https://arduino.cc/en/software) | ≥ 1.5.x | Compile + Upload |
-| Realtek AmebaPro2 SDK | 4.1.0 | Board support package |
-| VS Code / Antigravity IDE | Any | Code editor |
-| VLC Media Player | Any | RTSP stream viewer |
-
-### Board Manager URL (add to Arduino CLI config)
-```
-https://github.com/Ameba-AIoT/ameba-arduino-pro2/raw/main/Arduino_package/package_realtek_amebapro2_index.json
-```
-
----
-
-## 🚀 Setup & Upload
-
-### 1. Install Arduino CLI & Board Package
-```powershell
-# Download arduino-cli.exe to C:\Arduino\ then:
-arduino-cli config add board_manager.additional_urls "https://github.com/Ameba-AIoT/ameba-arduino-pro2/raw/main/Arduino_package/package_realtek_amebapro2_index.json"
-arduino-cli core update-index
-arduino-cli core install realtek:AmebaPro2
-```
-
-### 2. Clone this repository
-```bash
-git clone https://github.com/NNavoda/AMB82-MINI-Vision-Hub.git
-cd AMB82-MINI-Vision-Hub
-```
-
-### 3. Enter Boot Mode on AMB82-MINI
-1. **Hold** the `BOOT` button
-2. **Press + release** the `RESET` button
-3. **Release** `BOOT`
-
-### 4. Upload firmware
-```powershell
-arduino-cli upload -p COM5 --fqbn realtek:AmebaPro2:Ameba_AMB82-MINI "RTSP\RTSP.ino"
-```
-> Replace `COM5` with your actual port (check Device Manager → Ports)
-
----
-
-## 📺 Viewing the Stream
-
-1. Connect to Wi-Fi: **`RobotCar-Demo`** / password: **`openday2025`**
-2. Open **VLC** → Media → Open Network Stream:
-   ```
-   rtsp://192.168.1.1:554/
-   ```
-3. For lower latency, set VLC network cache to **100ms**:  
-   `Tools → Preferences → Input/Codecs → Network caching = 100`
-
----
-
-## 🧠 Object Detection Model
-
-| Parameter | Value |
-|-----------|-------|
-| Model | YOLOv4-Tiny (INT8 quantised) |
-| Input resolution | 416 × 416 |
-| Dataset | COCO (80 classes) |
-| Confidence threshold | 0.30 |
-| NMS threshold | 0.45 |
-| Max detections/frame | 14 |
-
-**Detectable classes include:** person · bicycle · car · motorbike · bus · truck · bottle · chair · laptop · phone · and 70 more.
+### 🧤 **Gesture Glove (ESP32-C3)**
+- **MPU-6050 IMU**: Fuses accelerometer and gyroscope data using a complementary filter for stable pitch/roll calculation.
+- **Gesture Classification**: Translates hand tilts (Pitch/Roll) into Forward, Reverse, Left (Tank Turn), Right (Tank Turn), and Stop commands.
+- **Proportional Speed**: Motor speed scales dynamically based on the steepness of the hand tilt.
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 AMB82-MINI-Vision-Hub/
 ├── RTSP/
-│   ├── RTSP.ino            # Main sketch — Vision Hub firmware
-│   └── ObjectClassList.h   # COCO 80-class lookup table
+│   ├── RTSP.ino                  # AMB82-MINI Vision Hub firmware
+│   └── ObjectClassList.h         # COCO 80-class lookup table
+├── ESP32-Car/
+│   └── WebMotorControl/          
+│       └── WebMotorControl.ino   # ESP32 Motor & Servo Web Controller
+├── Gesture_Glove/
+│   └── Gesture_Glove.ino         # ESP32-C3 MPU-6050 IMU Controller
+├── 3D Files/                     # 3D printable parts for the robot chassis
 ├── .vscode/
-│   ├── arduino.json        # Board & port configuration
-│   ├── tasks.json          # One-click compile/upload tasks
-│   ├── settings.json       # Editor settings
-│   └── keybindings.json    # Arduino IDE-style shortcuts
-├── .gitignore
-├── LICENSE                 # MIT
+│   └── ...                       # Editor configurations
 └── README.md
 ```
 
 ---
 
+## 🛠️ Hardware Requirements
+
+- **Vision**: Realtek AMB82-MINI development board + camera module
+- **Car**: ESP32 Dev Module (30-pin), 2x TB6612FNG motor drivers, 4x DC Motors, 2x MG996R Servos, Chassis.
+- **Glove**: ESP32-C3 Super Mini, MPU-6050 GY-521 IMU module, 3.7V Battery.
+
+---
+
+## 🚀 Setup & Usage
+
+### 1. Car Setup (ESP32)
+1. Flash `ESP32-Car/WebMotorControl/WebMotorControl.ino` to the ESP32.
+2. The ESP32 will connect to your specified Wi-Fi hotspot. Check the Serial Monitor for its IP address.
+3. Open the IP address in a browser to access the manual slider dashboard.
+
+### 2. Vision Hub (AMB82-MINI)
+1. Flash `RTSP/RTSP.ino` to the AMB82-MINI.
+2. Connect to its `RobotCar-Demo` Wi-Fi AP.
+3. Open `rtsp://192.168.1.1:554/` in VLC Media Player to view the live object detection stream.
+
+### 3. Gesture Glove (ESP32-C3)
+1. Update the Car's IP address in `Gesture_Glove.ino`.
+2. Flash `Gesture_Glove/Gesture_Glove.ino` to the ESP32-C3.
+3. The glove will connect to the same Wi-Fi network and begin sending HTTP GET requests to the car as you tilt your hand.
+
+---
+
 ## 🗺️ Roadmap
 
-This is the first milestone of a larger autonomous driving project:
-
 - [x] **v1.0** — Vision Hub: RTSP streaming + YOLOv4 object detection OSD
-- [ ] **v1.1** — Transmit detection results over UDP to control node
-- [ ] **v1.2** — Lane detection integration
-- [ ] **v2.0** — Full autonomous navigation loop
+- [x] **v1.1** — Decentralized nodes: Car web controller + IMU Gesture Glove
+- [ ] **v1.2** — Fast-batch HTTP endpoint for lower latency glove-to-car control
+- [ ] **v2.0** — Full autonomous navigation loop (Vision Hub sending UDP drive commands)
 
 ---
 

@@ -30,13 +30,13 @@ const char* PASSWORD = "00000007";
 // ----------------------------------------------------------
 // PIN DEFINITIONS — RIGHT MOTOR CONTROLLER
 // ----------------------------------------------------------
-#define M_FR_PWMA  26
-#define M_FR_AIN1  27
-#define M_FR_AIN2  14
+#define M_FR_PWMA  14
+#define M_FR_AIN1  26
+#define M_FR_AIN2  27
 
-#define M_RR_BIN1  32
-#define M_RR_BIN2  33
-#define M_RR_PWMB  25
+#define M_RR_BIN1  33
+#define M_RR_BIN2  25
+#define M_RR_PWMB  32
 
 // ----------------------------------------------------------
 // PIN DEFINITIONS — CAMERA SERVO (MG996R, 180°)
@@ -118,16 +118,16 @@ void driveFL(int spd) {
   }
 }
 
-/** Drive Front-Right (inverted direction logic from MotorTest) */
+/** Drive Front-Right — direction fully inverted vs original to fix reverse */
 void driveFR(int spd) {
   if (spd == 0) {
     digitalWrite(M_FR_AIN1, LOW); digitalWrite(M_FR_AIN2, LOW);
     ledcWrite(M_FR_PWMA, 0);
   } else if (spd > 0) {
-    digitalWrite(M_FR_AIN1, LOW);  digitalWrite(M_FR_AIN2, HIGH);
+    digitalWrite(M_FR_AIN1, HIGH); digitalWrite(M_FR_AIN2, LOW);
     ledcWrite(M_FR_PWMA, spd);
   } else {
-    digitalWrite(M_FR_AIN1, HIGH); digitalWrite(M_FR_AIN2, LOW);
+    digitalWrite(M_FR_AIN1, LOW);  digitalWrite(M_FR_AIN2, HIGH);
     ledcWrite(M_FR_PWMA, -spd);
   }
 }
@@ -146,16 +146,16 @@ void driveRL(int spd) {
   }
 }
 
-/** Drive Rear-Right (standard direction logic from MotorTest) */
+/** Drive Rear-Right — direction fully inverted vs original to fix reverse */
 void driveRR(int spd) {
   if (spd == 0) {
     digitalWrite(M_RR_BIN1, LOW); digitalWrite(M_RR_BIN2, LOW);
     ledcWrite(M_RR_PWMB, 0);
   } else if (spd > 0) {
-    digitalWrite(M_RR_BIN1, HIGH); digitalWrite(M_RR_BIN2, LOW);
+    digitalWrite(M_RR_BIN1, LOW);  digitalWrite(M_RR_BIN2, HIGH);
     ledcWrite(M_RR_PWMB, spd);
   } else {
-    digitalWrite(M_RR_BIN1, LOW);  digitalWrite(M_RR_BIN2, HIGH);
+    digitalWrite(M_RR_BIN1, HIGH); digitalWrite(M_RR_BIN2, LOW);
     ledcWrite(M_RR_PWMB, -spd);
   }
 }

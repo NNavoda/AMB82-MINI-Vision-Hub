@@ -142,19 +142,18 @@ void setup()
 
     // -----------------------------------------------------------------------
     // 4. Initialise NPU object detection engine
-    //    Model : DEFAULT_YOLOV4TINY — significantly better accuracy than v3tiny,
+    //    Model : DEFAULT_YOLOV7TINY — State-of-the-art tiny model, highly accurate.
     //            especially for person detection and multi-object scenes.
     //    configThreshold(confidence, nms):
-    //      confidence = 0.30  → catch more objects (was 0.50 default — too strict)
-    //      nms        = 0.45  → allow more non-overlapping boxes to survive
-    //                          (was 0.30 — was suppressing valid separate objects)
+    //      confidence = 0.55  → strict threshold to eliminate false positives (e.g. wall shadows)
+    //      nms        = 0.30  → suppress overlapping duplicate boxes
     // -----------------------------------------------------------------------
     ObjDet.configVideo(configNN);
-    ObjDet.modelSelect(OBJECT_DETECTION, DEFAULT_YOLOV4TINY, NA_MODEL, NA_MODEL);
-    ObjDet.configThreshold(0.30, 0.45);   // confidence=0.30, nms=0.45
+    ObjDet.modelSelect(OBJECT_DETECTION, DEFAULT_YOLOV7TINY, NA_MODEL, NA_MODEL);
+    ObjDet.configThreshold(0.55, 0.30);   // confidence=0.55, nms=0.30
     ObjDet.setResultCallback(onDetectionResult);
     ObjDet.begin();
-    Serial.println("[VisionHub] NPU / YOLOv4-Tiny initialised (conf=0.30, nms=0.45).");
+    Serial.println("[VisionHub] NPU / YOLOv7-Tiny initialised (conf=0.55, nms=0.30).");
 
     // -----------------------------------------------------------------------
     // 5. StreamIO pipeline A: Camera Ch0 → RTSP
